@@ -1,0 +1,16 @@
+{
+  "applications": [
+    {
+      "name": "LazyGit",
+      "command": "lazygit"
+    },
+    {
+      "name": "LazyDocker",
+      "command": "lazydocker"
+    },
+    {
+      "name": "LazySSH",
+      "command": "lazyssh"
+    }
+  ]
+}
