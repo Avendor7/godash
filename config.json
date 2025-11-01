@@ -11,6 +11,14 @@
     {
       "name": "LazySSH",
       "command": "lazyssh"
+    },
+    {
+      "name": "watchtower",
+      "command": "watchtower"
+    },
+    {
+      "name": "btop",
+      "command": "btop"
     }
   ]
 }
