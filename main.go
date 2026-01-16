@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -10,234 +11,274 @@ import (
 type Panel int
 
 const (
-	NavigationPanel Panel = iota
-	MainPanel
-	StatusPanel
+	PanelTUI Panel = iota
+	PanelDirs
+	PanelShortcuts
 )
 
-type model struct {
-	panel      Panel            // current active panel
-	navItems   []string         // navigation items in left panel
-	navCursor  int              // cursor in navigation panel
-	choices    []string         // items in main panel (grocery list)
-	mainCursor int              // cursor in main panel
-	selected   map[int]struct{} // which to-do items are selected
-	width      int              // terminal width
-	height     int              // terminal height
+type Item struct {
+	Title       string
+	Description string
+	Path        string
 }
 
-func initialModel() model {
-	return model{
-		panel:    MainPanel,
-		navItems: []string{"Groceries", "Tasks", "Notes", "Settings"},
-		choices:  []string{"Buy carrots", "Buy celery", "Buy kohlrabi", "Buy cheese", "Buy burgers"},
-		selected: make(map[int]struct{}),
+type Model struct {
+	focus  Panel
+	width  int
+	height int
+
+	topItems    []Item
+	midItems    []Item
+	bottomItems []Item
+
+	topCursor    int
+	midCursor    int
+	bottomCursor int
+
+	rightTitle string
+	rightBody  string
+}
+
+func initialModel() *Model {
+	return &Model{
+		focus: PanelTUI,
+		topItems: []Item{
+			{Title: "TUI Apps: Clock", Description: "A terminal clock widget"},
+			{Title: "TUI Apps: Calendar", Description: "Calendar in terminal"},
+			{Title: "TUI Apps: Notes", Description: "Notes app in terminal"},
+			{Title: "TUI Apps: Todo", Description: "Tiny todo app"},
+		},
+		midItems: []Item{
+			{Title: "Dev Projects", Path: "/home/you/projects"},
+			{Title: "Work", Path: "/home/you/work"},
+			{Title: "Docs", Path: "/home/you/docs"},
+		},
+		bottomItems: []Item{
+			{Title: "Home", Path: "/home/you"},
+			{Title: "Downloads", Path: "/home/you/Downloads"},
+			{Title: "Configs", Path: "/home/you/.config"},
+		},
 	}
 }
 
-func (m model) Init() tea.Cmd {
-	// Just return `nil`, which means "no I/O right now, please."
-	return nil
+func (m *Model) Init() tea.Cmd { return nil }
+
+func (m *Model) cycleFocus() {
+	m.focus = (m.focus + 1) % 3
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) navigateUp() {
+	switch m.focus {
+	case PanelTUI:
+		if m.topCursor > 0 {
+			m.topCursor--
+		}
+	case PanelDirs:
+		if m.midCursor > 0 {
+			m.midCursor--
+		}
+	case PanelShortcuts:
+		if m.bottomCursor > 0 {
+			m.bottomCursor--
+		}
+	}
+}
+
+func (m *Model) navigateDown() {
+	switch m.focus {
+	case PanelTUI:
+		if m.topCursor < len(m.topItems)-1 {
+			m.topCursor++
+		}
+	case PanelDirs:
+		if m.midCursor < len(m.midItems)-1 {
+			m.midCursor++
+		}
+	case PanelShortcuts:
+		if m.bottomCursor < len(m.bottomItems)-1 {
+			m.bottomCursor++
+		}
+	}
+}
+
+func (m *Model) halfName(title string) string {
+	parts := strings.SplitN(title, ":", 2)
+	if len(parts) == 2 {
+		return strings.TrimSpace(parts[1])
+	}
+	return strings.TrimSpace(title)
+}
+
+func (m *Model) renderHTOPPreview(name string) string {
+	// Simple, static HTOP-like preview for demonstration
+	return fmt.Sprintf("Preview: %s\nCPU  12%%  [||        ]\nMem  47%%  [||||      ]\nTasks 42 (threads: 6)\nUp 1d 2h", name)
+}
+
+func (m *Model) activateCurrent() {
+	switch m.focus {
+	case PanelTUI:
+		if m.topCursor < len(m.topItems) {
+			it := m.topItems[m.topCursor]
+			name := m.halfName(it.Title)
+			m.rightTitle = "HTOP Preview: " + name
+			m.rightBody = m.renderHTOPPreview(name)
+		}
+	case PanelDirs:
+		if m.midCursor < len(m.midItems) {
+			it := m.midItems[m.midCursor]
+			name := m.halfName(it.Title)
+			m.rightTitle = "HTOP Preview: " + name
+			m.rightBody = m.renderHTOPPreview(name)
+		}
+	case PanelShortcuts:
+		if m.bottomCursor < len(m.bottomItems) {
+			it := m.bottomItems[m.bottomCursor]
+			name := m.halfName(it.Title)
+			m.rightTitle = "HTOP Preview: " + name
+			m.rightBody = m.renderHTOPPreview(name)
+		}
+	}
+}
+
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-
-	// Is it a key press?
 	case tea.KeyMsg:
-
-		// Cool, what was the actual key pressed?
 		switch msg.String() {
-
-		// These keys should exit the program.
 		case "ctrl+c", "q":
 			return m, tea.Quit
-
-		// Switch between panels
 		case "tab":
-			switch m.panel {
-			case NavigationPanel:
-				m.panel = MainPanel
-				// Ensure main cursor is in bounds
-				if m.mainCursor >= len(m.choices) && len(m.choices) > 0 {
-					m.mainCursor = len(m.choices) - 1
-				}
-			case MainPanel:
-				m.panel = NavigationPanel
-				// Ensure nav cursor is in bounds
-				if m.navCursor >= len(m.navItems) && len(m.navItems) > 0 {
-					m.navCursor = len(m.navItems) - 1
-				}
-			}
-
-		// Navigation controls based on active panel
+			m.cycleFocus()
 		case "up", "k":
-			switch m.panel {
-			case NavigationPanel:
-				if m.navCursor > 0 {
-					m.navCursor--
-				}
-			case MainPanel:
-				if m.mainCursor > 0 {
-					m.mainCursor--
-				}
-			}
-
+			m.navigateUp()
 		case "down", "j":
-			switch m.panel {
-			case NavigationPanel:
-				if m.navCursor < len(m.navItems)-1 {
-					m.navCursor++
-				}
-			case MainPanel:
-				if m.mainCursor < len(m.choices)-1 {
-					m.mainCursor++
-				}
-			}
-
-		// Toggle selection in main panel
+			m.navigateDown()
 		case "enter", " ":
-			if m.panel == MainPanel {
-				_, ok := m.selected[m.mainCursor]
-				if ok {
-					delete(m.selected, m.mainCursor)
-				} else {
-					m.selected[m.mainCursor] = struct{}{}
-				}
-			}
+			m.activateCurrent()
 		}
-
-	// Handle window resize
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 	}
-
-	// Return the updated model to the Bubble Tea runtime for processing.
 	return m, nil
 }
 
-func (m model) View() string {
+func (m Model) View() string {
 	if m.width == 0 {
-		m.width = 80
-		m.height = 24
+		m.width = 120
+	}
+	if m.height == 0 {
+		m.height = 30
+	}
+	leftW := 28
+	rightW := m.width - leftW - 3
+	if rightW < 20 {
+		rightW = 20
 	}
 
-	// Panel dimensions
-	navWidth := 25
-	mainWidth := m.width - navWidth - 3 // -3 for borders and spacing
-	mainHeight := m.height - 6          // -6 for headers, borders, and status bar
+	leftLines := renderPanelBlock("TUI Apps", m.topItems, m.topCursor, m.focus == PanelTUI, leftW)
+	leftLines = append(leftLines, renderPanelBlock("Common Directories", m.midItems, m.midCursor, m.focus == PanelDirs, leftW)...)
+	leftLines = append(leftLines, renderPanelBlock("Shortcuts", m.bottomItems, m.bottomCursor, m.focus == PanelShortcuts, leftW)...)
 
-	// Build the UI
-	s := ""
+	rightLines := renderRightPane(m.rightTitle, m.rightBody, rightW)
 
-	// Top border
-	s += fmt.Sprintf("┌%s┬%s┐\n", repeat("─", navWidth), repeat("─", mainWidth))
-
-	// Navigation panel header
-	s += fmt.Sprintf("│%s│%s│\n",
-		padCenter("Navigation", navWidth),
-		padCenter("Grocery List", mainWidth))
-
-	// Separator
-	s += fmt.Sprintf("├%s┼%s┤\n", repeat("─", navWidth), repeat("─", mainWidth))
-
-	// Content rows
-	for i := 0; i < mainHeight; i++ {
-		// Navigation content
-		navContent := repeat(" ", navWidth)
-		if i < len(m.navItems) {
-			cursor := " "
-			if m.panel == NavigationPanel && m.navCursor == i {
-				cursor = ">"
-			}
-			item := m.navItems[i]
-			navContent = fmt.Sprintf("%s %s", cursor, item)
-			if len(navContent) > navWidth {
-				navContent = navContent[:navWidth]
-			}
-			navContent = padRight(navContent, navWidth)
-
-			// Add highlighting for active panel cursor
-			if m.panel == NavigationPanel && m.navCursor == i {
-				navContent = fmt.Sprintf("\x1b[7m%s\x1b[0m", navContent)
-			}
-		}
-
-		// Main content
-		mainContent := repeat(" ", mainWidth)
-		if i < len(m.choices) {
-			cursor := " "
-			if m.panel == MainPanel && m.mainCursor == i {
-				cursor = ">"
-			}
-			checked := " "
-			if _, ok := m.selected[i]; ok {
-				checked = "x"
-			}
-			item := fmt.Sprintf("%s [%s] %s", cursor, checked, m.choices[i])
-			if len(item) > mainWidth {
-				item = item[:mainWidth]
-			}
-			mainContent = padRight(item, mainWidth)
-
-			// Add highlighting for active panel cursor
-			if m.panel == MainPanel && m.mainCursor == i {
-				mainContent = fmt.Sprintf("\x1b[7m%s\x1b[0m", mainContent)
-			}
-		}
-
-		s += fmt.Sprintf("│%s│%s│\n", navContent, mainContent)
+	max := len(leftLines)
+	if len(rightLines) > max {
+		max = len(rightLines)
 	}
 
-	// Bottom separator before status
-	s += fmt.Sprintf("├%s┼%s┤\n", repeat("─", navWidth), repeat("─", mainWidth))
+	var s []string
+	for i := 0; i < max; i++ {
+		var ll string
+		if i < len(leftLines) {
+			ll = leftLines[i]
+		} else {
+			ll = strings.Repeat(" ", leftW)
+		}
+		var rr string
+		if i < len(rightLines) {
+			rr = rightLines[i]
+		} else {
+			rr = ""
+		}
+		rr = padRight(rr, rightW)
+		s = append(s, fmt.Sprintf("│%s│%s│", ll, rr))
+	}
 
-	// Status bar
-	statusText := "Tab: Switch panels | ↑↓: Navigate | Space: Toggle | q: Quit"
-	panelText := fmt.Sprintf("Active: %s",
-		map[Panel]string{NavigationPanel: "Navigation", MainPanel: "Main"}[m.panel])
-
-	s += fmt.Sprintf("│%s│%s│\n",
-		padRight(panelText, navWidth),
-		padRight(statusText, mainWidth))
-
-	// Bottom border
-	s += fmt.Sprintf("└%s┴%s┘", repeat("─", navWidth), repeat("─", mainWidth))
-
-	return s
+	top := fmt.Sprintf("┌%s┬%s┐", strings.Repeat("─", leftW), strings.Repeat("─", rightW))
+	bottom := fmt.Sprintf("└%s┴%s┘", strings.Repeat("─", leftW), strings.Repeat("─", rightW))
+	return top + "\n" + strings.Join(s, "\n") + "\n" + bottom
 }
 
-// Helper functions
-func repeat(s string, count int) string {
-	result := ""
-	for i := 0; i < count; i++ {
-		result += s
+func renderPanelBlock(title string, items []Item, cursor int, focused bool, width int) []string {
+	lines := []string{padCenter(title, width)}
+	for i, it := range items {
+		prefix := "  "
+		if focused && i == cursor {
+			prefix = "> "
+		}
+		text := prefix + it.Title
+		if len(text) > width {
+			text = text[:width]
+		}
+		line := padRight(text, width)
+		if focused && i == cursor {
+			line = fmt.Sprintf("\x1b[7m%s\x1b[0m", line)
+		}
+		lines = append(lines, line)
 	}
-	return result
+	for len(lines) < 4 {
+		lines = append(lines, repeatSpace(width))
+	}
+	lines = append(lines, repeatChar("─", width))
+	return lines
+}
+
+func renderRightPane(title, body string, width int) []string {
+	lines := []string{padCenter("Details", width)}
+	lines = append(lines, repeatSpace(width))
+	if title != "" {
+		lines = append(lines, padRight("Active: "+title, width))
+		lines = append(lines, repeatSpace(width))
+	} else {
+		lines = append(lines, padRight("Active: None", width))
+		lines = append(lines, repeatSpace(width))
+	}
+	if body != "" {
+		for _, line := range strings.Split(body, "\n") {
+			lines = append(lines, padRight(line, width))
+		}
+	}
+	for len(lines) < 6 {
+		lines = append(lines, repeatSpace(width))
+	}
+	return lines
 }
 
 func padCenter(text string, width int) string {
 	if len(text) >= width {
 		return text[:width]
 	}
-	padding := width - len(text)
-	left := padding / 2
-	right := padding - left
-	return repeat(" ", left) + text + repeat(" ", right)
+	pad := width - len(text)
+	left := pad / 2
+	right := pad - left
+	return repeatSpace(left) + text + repeatSpace(right)
 }
 
 func padRight(text string, width int) string {
 	if len(text) >= width {
 		return text[:width]
 	}
-	return text + repeat(" ", width-len(text))
+	return text + repeatSpace(width-len(text))
 }
 
+func repeatSpace(n int) string          { return strings.Repeat(" ", n) }
+func repeatChar(c string, n int) string { return strings.Repeat(c, n) }
+
 func main() {
-	p := tea.NewProgram(initialModel())
+	program := initialModel()
+	p := tea.NewProgram(program)
 	if _, err := p.Run(); err != nil {
-		fmt.Printf("Alas, there's been an error: %v", err)
+		fmt.Fprintf(os.Stderr, "Alas, there's been an error: %v\n", err)
 		os.Exit(1)
 	}
 }
